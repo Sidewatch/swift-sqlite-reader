@@ -15,7 +15,8 @@ let package = Package(
     ],
     targets: [
         // Links the system libsqlite3 automatically via `import SQLite3`.
-        .target(name: "SQLiteReader", path: "Sources"),
+        .target(name: "SQLiteReader", path: "Sources",
+                swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]),
         .testTarget(name: "SQLiteReaderTests", dependencies: ["SQLiteReader"], path: "Tests"),
     ]
 )
