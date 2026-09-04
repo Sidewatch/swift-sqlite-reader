@@ -53,6 +53,12 @@ else { for row in result.rows { print(row) } }
 - Row values are stringified (`NULL`, integers, doubles, text; blobs as `‹blob Nb›`).
 - `run(_:limit:)` caps returned rows (default 2000) for display safety.
 
+## For agents
+
+Read `CONTRIBUTING.md` first: the folder layout and the PR rules. `swift test` is the whole
+check, and a new test must fail before the change it covers. `CLAUDE.md` / `AGENTS.md` carry a
+module map.
+
 ## License
 
 MIT
