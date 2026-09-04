@@ -184,72 +184,68 @@ public final class SQLiteDB {
     ///   for scripts).
     @discardableResult
     public func execute(_ sql: String, parameters: [Value?] = [], limit: Int = 2000) -> Result {
-        guard let db else { return Result(columns: [], rows: [], error: "No database", rowsAffected: 0) }
+        guard let db else { return .failure("No database") }
+        let prepared = prepareSingleStatement(sql, on: db)
+        if let error = prepared.error { return .failure(error) }
+        guard let stmt = prepared.statement else { return Result(columns: [], rows: [], error: nil, rowsAffected: 0) }
+        defer { sqlite3_finalize(stmt) }
+        if let error = bind(parameters, to: stmt, on: db) { return .failure(error) }
+        return collect(stmt, on: db, limit: limit)
+    }
+
+    /// Compiles exactly ONE statement. Trailing whitespace and comments are fine; anything that
+    /// compiles to (or fails as) another statement is an error rather than silently dropped —
+    /// positional parameters can't be split across a script (use ``run(_:limit:)`` for those).
+    private func prepareSingleStatement(_ sql: String, on db: OpaquePointer) -> (statement: OpaquePointer?, error: String?) {
         var stmt: OpaquePointer?
-        var prepareError: String?
-        var trailingStatement = false
+        var error: String?
+        var trailing = false
         sql.withCString { (base: UnsafePointer<CChar>) in
             var tail: UnsafePointer<CChar>?
             guard sqlite3_prepare_v2(db, base, -1, &stmt, &tail) == SQLITE_OK else {
-                prepareError = String(cString: sqlite3_errmsg(db))
-                return
+                error = String(cString: sqlite3_errmsg(db)); return
             }
-            // Trailing whitespace/comments are fine; anything that compiles to (or
-            // fails as) another statement is not.
             if let tail, tail.pointee != 0 {
                 var rest: OpaquePointer?
-                if sqlite3_prepare_v2(db, tail, -1, &rest, nil) == SQLITE_OK {
-                    if rest != nil { trailingStatement = true }
-                } else {
-                    trailingStatement = true
-                }
+                trailing = sqlite3_prepare_v2(db, tail, -1, &rest, nil) != SQLITE_OK || rest != nil
                 if let rest { sqlite3_finalize(rest) }
             }
         }
-        if let prepareError {
+        if error == nil, trailing {
+            error = "SQL contains more than one statement — execute() runs exactly one; use run() for scripts"
+        }
+        if let error {
             if let stmt { sqlite3_finalize(stmt) }
-            return Result(columns: [], rows: [], error: prepareError, rowsAffected: 0)
+            return (nil, error)
         }
-        guard let stmt else { return Result(columns: [], rows: [], error: nil, rowsAffected: 0) }
-        defer { sqlite3_finalize(stmt) }
-        guard !trailingStatement else {
-            return Result(columns: [], rows: [],
-                          error: "SQL contains more than one statement — execute() runs exactly one; use run() for scripts",
-                          rowsAffected: 0)
-        }
+        return (stmt, nil)
+    }
 
+    /// Binds every parameter positionally; the error message, or nil when all bound.
+    private func bind(_ parameters: [Value?], to stmt: OpaquePointer, on db: OpaquePointer) -> String? {
         let expected = Int(sqlite3_bind_parameter_count(stmt))
         guard parameters.count == expected else {
-            return Result(columns: [], rows: [],
-                          error: "SQL expects \(expected) parameter\(expected == 1 ? "" : "s") but \(parameters.count) provided",
-                          rowsAffected: 0)
+            return "SQL expects \(expected) parameter\(expected == 1 ? "" : "s") but \(parameters.count) provided"
         }
-        for (i, p) in parameters.enumerated() {
-            let idx = Int32(i + 1)
-            let rc: Int32
-            switch p {
-            case .none:
-                rc = sqlite3_bind_null(stmt, idx)
-            case .some(.integer(let v)):
-                rc = sqlite3_bind_int64(stmt, idx, v)
-            case .some(.real(let v)):
-                rc = sqlite3_bind_double(stmt, idx, v)
-            case .some(.text(let s)):
-                // Explicit byte length preserves embedded NULs; SQLITE_TRANSIENT copies
-                // the buffer (the bridged pointer dies at the end of the call).
-                rc = sqlite3_bind_text(stmt, idx, s, Int32(s.utf8.count), Self.transient)
-            case .some(.blob(let d)):
-                // bind_blob with a NULL base pointer binds SQL NULL — an empty Data
-                // must instead bind a genuine zero-length blob.
-                rc = d.isEmpty
-                    ? sqlite3_bind_zeroblob(stmt, idx, 0)
-                    : d.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32(d.count), Self.transient) }
-            }
-            guard rc == SQLITE_OK else {
-                return Result(columns: [], rows: [], error: String(cString: sqlite3_errmsg(db)), rowsAffected: 0)
-            }
+        for (i, p) in parameters.enumerated() where bind(p, at: Int32(i + 1), to: stmt) != SQLITE_OK {
+            return String(cString: sqlite3_errmsg(db))
         }
-        return collect(stmt, on: db, limit: limit)
+        return nil
+    }
+
+    /// One value into one slot. Text passes an explicit byte length (embedded NULs survive) and
+    /// SQLITE_TRANSIENT (the bridged pointer dies at the end of the call); an empty blob binds a
+    /// genuine zero-length blob, since bind_blob with a NULL base pointer would bind SQL NULL.
+    private func bind(_ value: Value?, at idx: Int32, to stmt: OpaquePointer) -> Int32 {
+        switch value {
+        case .none:                 return sqlite3_bind_null(stmt, idx)
+        case .some(.integer(let v)): return sqlite3_bind_int64(stmt, idx, v)
+        case .some(.real(let v)):    return sqlite3_bind_double(stmt, idx, v)
+        case .some(.text(let s)):    return sqlite3_bind_text(stmt, idx, s, Int32(s.utf8.count), Self.transient)
+        case .some(.blob(let d)):
+            return d.isEmpty ? sqlite3_bind_zeroblob(stmt, idx, 0)
+                : d.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32(d.count), Self.transient) }
+        }
     }
 
     /// The rowid of the most recent successful `INSERT` on this connection
@@ -310,4 +306,9 @@ public final class SQLiteDB {
 
     /// Instance shorthand for ``quoteIdentifier(_:)`` used by the introspection helpers.
     private func quoteIdent(_ s: String) -> String { Self.quoteIdentifier(s) }
+}
+
+extension SQLiteDB.Result {
+    /// A result carrying only an error.
+    static func failure(_ message: String) -> SQLiteDB.Result { .init(columns: [], rows: [], error: message, rowsAffected: 0) }
 }
