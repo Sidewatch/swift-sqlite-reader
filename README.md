@@ -15,7 +15,7 @@ A tiny, zero-dependency wrapper over the system `libsqlite3` for **reading and i
 ## Requirements
 
 - macOS 14+ (Foundation only; other Apple platforms at SwiftPM's default minimums)
-- Swift 6.0+ (Swift 6 language mode)
+- Swift 6.2+ (Swift 6 language mode)
 
 ## Installation
 
