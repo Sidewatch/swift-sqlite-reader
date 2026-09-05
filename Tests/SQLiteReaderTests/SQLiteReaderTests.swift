@@ -2,6 +2,9 @@
 //  SQLiteReaderTests.swift
 //  Tests for SwiftSQLiteReader
 //
+//  Tests for `SQLiteDB`: tables and views sorted, schema reads, queries, rowid edits, and the
+//  read-only flag.
+//
 //  Created by David Sherlock on 7/9/26.
 //
 
@@ -9,6 +12,8 @@ import XCTest
 import SQLite3
 @testable import SQLiteReader
 
+/// Tests for `SQLiteDB`: tables and views sorted, schema reads, queries, rowid edits, and the
+/// read-only flag.
 final class SQLiteReaderTests: XCTestCase {
 
     // MARK: - In-memory schema (init?(sql:))
