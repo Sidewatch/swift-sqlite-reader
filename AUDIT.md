@@ -20,6 +20,13 @@ dead-code and risk-pattern scans, docs drift); line-by-line logic review was tar
 - Build: clean. Tests: green.
 - Nothing to fix in this package.
 
+## Logic review — 18 Sep 2026 (every source and test file, line by line)
+
+Nothing to fix. Checked: every prepared statement is finalized on every path (`defer`, and the
+multi-statement tail); the read-write open falling back to read-only; the in-memory open; `deinit`
+closing the handle; value mapping per column type including NULL and blobs; the column and
+foreign-key pragmas.
+
 ## Known non-issues (do not "fix" these again)
 
 - `SQLiteDB(url:)` opens READWRITE without CREATE: a harness that wants a scratch database must create the (empty) file first.
@@ -27,3 +34,4 @@ dead-code and risk-pattern scans, docs drift); line-by-line logic review was tar
 ## History
 
 - 17 Sep 2026 — full audit (app + all 20 libraries), Claude with David.
+- 18 Sep 2026 — logic review (every source and test file, line by line), Claude with David.
