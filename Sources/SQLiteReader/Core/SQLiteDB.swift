@@ -67,9 +67,51 @@ public final class SQLiteDB {
         }
         db = handle
         readOnly = false
-        var err: UnsafeMutablePointer<CChar>?
-        sqlite3_exec(handle, sql, nil, nil, &err)
-        if let err { sqlite3_free(err) }
+        // One statement at a time, each failure skipped (20 Sep 2026): a single exec stopped at
+        // the first statement SQLite could not take, so a Postgres schema opening with
+        // `CREATE EXTENSION` or carrying an `ALTER TABLE … ADD CONSTRAINT` built no tables at all.
+        for statement in Self.statements(in: sql) {
+            var err: UnsafeMutablePointer<CChar>?
+            sqlite3_exec(handle, statement, nil, nil, &err)
+            if let err { sqlite3_free(err) }
+        }
+    }
+
+    /// The statements of a script: split on `;` outside quotes and comments (`--` to the end of
+    /// the line, `/* */` blocks), trimmed, empties dropped. A `CREATE TRIGGER … BEGIN … END;`
+    /// body is kept whole.
+    public static func statements(in script: String) -> [String] {
+        var out: [String] = []
+        var current = ""
+        var inSingle = false, inDouble = false, inLine = false, inBlock = false, inTrigger = false
+        let chars = Array(script)
+        var i = 0
+        func upcomingWord(_ from: Int) -> String {
+            var j = from; var w = ""
+            while j < chars.count, chars[j].isLetter { w.append(chars[j]); j += 1 }
+            return w.uppercased()
+        }
+        while i < chars.count {
+            let c = chars[i], next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+            if inLine { if c == "\n" { inLine = false; current.append(c) }; i += 1; continue }
+            if inBlock { if c == "*", next == "/" { inBlock = false; i += 2 } else { i += 1 }; continue }
+            if inSingle { current.append(c); if c == "'" { inSingle = false }; i += 1; continue }
+            if inDouble { current.append(c); if c == "\"" { inDouble = false }; i += 1; continue }
+            if c == "-", next == "-" { inLine = true; i += 2; continue }
+            if c == "/", next == "*" { inBlock = true; i += 2; continue }
+            if c == "'" { inSingle = true; current.append(c); i += 1; continue }
+            if c == "\"" { inDouble = true; current.append(c); i += 1; continue }
+            if c.isLetter, i == 0 || !chars[i - 1].isLetter {
+                let word = upcomingWord(i)
+                if word == "TRIGGER" { inTrigger = true }
+                if inTrigger, word == "END" { inTrigger = false }
+            }
+            if c == ";", !inTrigger { out.append(current); current = ""; i += 1; continue }
+            current.append(c)
+            i += 1
+        }
+        out.append(current)
+        return out.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     deinit { if let db { sqlite3_close(db) } }
