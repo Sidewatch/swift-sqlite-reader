@@ -122,6 +122,14 @@ public final class SQLiteDB {
         return r.rows.compactMap { $0.first }
     }
 
+    /// Which of ``tables()`` are VIEWS. A view is not a table — it has no rowid, its rows cannot
+    /// be edited or deleted, and its count is a query's result — so a reader that lists both
+    /// needs to be able to say which is which (25 Sep 2026).
+    public func viewNames() -> [String] {
+        let r = run("SELECT name FROM sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        return r.rows.compactMap { $0.first }
+    }
+
     /// The columns of `table`, via `PRAGMA table_info`.
     public func schema(_ table: String) -> [Column] {
         let r = run("PRAGMA table_info(\(quoteIdent(table)))")

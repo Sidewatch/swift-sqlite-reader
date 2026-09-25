@@ -25,6 +25,8 @@ final class SQLiteReaderTests: XCTestCase {
         """))
         XCTAssertFalse(db.readOnly)
         XCTAssertEqual(db.tables(), ["adults", "users"])   // sorted; view + table, internals hidden
+        XCTAssertEqual(db.viewNames(), ["adults"], "a view is not a table, and a lister showing both must be able to say which")
+        XCTAssertTrue(db.viewNames().allSatisfy { db.tables().contains($0) }, "every view is in the combined listing")
     }
 
     func testSchemaReportsPKAndNotNull() throws {
