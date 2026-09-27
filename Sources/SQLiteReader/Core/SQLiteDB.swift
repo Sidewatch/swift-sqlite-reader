@@ -1,11 +1,12 @@
 //
 //  SQLiteDB.swift
-//  SwiftSQLiteReader
+//  SQLiteReader
 //
 //  Zero-dependency read/introspect access to a SQLite database via the system
 //  libsqlite3. Values are stringified for display.
 //
 //  Created by David Sherlock on 7/9/26.
+//  Copyright © 2026 ArrayPress Limited. MIT licence.
 //
 
 import Foundation

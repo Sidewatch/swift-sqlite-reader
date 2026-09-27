@@ -1,11 +1,12 @@
 //
 //  SQLiteDB+Value.swift
-//  SwiftSQLiteReader
+//  SQLiteReader
 //
 //  A typed SQLite value for parameter binding. Kept nested (`SQLiteDB.Value`)
 //  to match `SQLiteDB.Result`.
 //
 //  Created by David Sherlock on 7/17/26.
+//  Copyright © 2026 ArrayPress Limited. MIT licence.
 //
 
 import Foundation

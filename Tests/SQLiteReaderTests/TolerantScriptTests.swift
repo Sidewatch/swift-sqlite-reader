@@ -1,8 +1,11 @@
 //
 //  TolerantScriptTests.swift
-//  Tests for SQLiteReader
+//  SQLiteReaderTests
 //
 //  A script builds what it can: a statement SQLite rejects is skipped, not fatal.
+//
+//  Created by David Sherlock on 9/20/26.
+//  Copyright © 2026 ArrayPress Limited. MIT licence.
 //
 
 import XCTest

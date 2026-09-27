@@ -1,11 +1,12 @@
 //
 //  SQLiteDB+Result.swift
-//  SwiftSQLiteReader
+//  SQLiteReader
 //
 //  The outcome of running a SQL statement. Kept nested (`SQLiteDB.Result`) so it
 //  does not collide with the standard library's `Swift.Result`.
 //
 //  Created by David Sherlock on 7/9/26.
+//  Copyright © 2026 ArrayPress Limited. MIT licence.
 //
 
 import Foundation

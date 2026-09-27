@@ -1,11 +1,12 @@
 //
 //  SQLiteReaderTests.swift
-//  Tests for SwiftSQLiteReader
+//  SQLiteReaderTests
 //
 //  Tests for `SQLiteDB`: tables and views sorted, schema reads, queries, rowid edits, and the
 //  read-only flag.
 //
 //  Created by David Sherlock on 7/9/26.
+//  Copyright © 2026 ArrayPress Limited. MIT licence.
 //
 
 import XCTest
