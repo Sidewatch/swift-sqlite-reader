@@ -165,7 +165,7 @@ public final class SQLiteDB {
     /// - Note: Blocking. Runs *any* SQL, writes included, when opened read-write (see
     ///   ``readOnly``). For user-supplied values use ``execute(_:parameters:limit:)``.
     public func run(_ sql: String, limit: Int = 2000) -> Result {
-        guard let db else { return Result(columns: [], rows: [], error: "No database", rowsAffected: 0) }
+        guard let db else { return Result(columns: [], rows: [], error: String(localized: "No database", bundle: .module, comment: "Database console error: the database file could not be opened."), rowsAffected: 0) }
         var last: Result?
         var lastWithColumns: Result?
         var failure: Result?
@@ -205,7 +205,7 @@ public final class SQLiteDB {
     ///   dropped (use ``run(_:limit:)`` for scripts).
     @discardableResult
     public func execute(_ sql: String, parameters: [Value?] = [], limit: Int = 2000) -> Result {
-        guard let db else { return .failure("No database") }
+        guard let db else { return .failure(String(localized: "No database", bundle: .module, comment: "Database console error: the database file could not be opened.")) }
         let prepared = prepareSingleStatement(sql, on: db)
         if let error = prepared.error { return .failure(error) }
         guard let stmt = prepared.statement else { return Result(columns: [], rows: [], error: nil, rowsAffected: 0) }
