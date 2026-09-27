@@ -19,6 +19,8 @@ A tiny, zero-dependency wrapper over the system `libsqlite3` for **reading and i
 
 ## Installation
 
+### Swift Package Manager
+
 ```swift
 dependencies: [
     .package(url: "https://github.com/Sidewatch/swift-sqlite-reader.git", from: "0.1.0")
@@ -61,4 +63,4 @@ module map.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
