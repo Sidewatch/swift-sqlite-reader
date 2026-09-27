@@ -14,18 +14,9 @@ import SQLite3
 
 /// Lightweight access to a SQLite database via the system `libsqlite3`.
 ///
-/// Opens read-write when possible and falls back to read-only. Row values are
-/// stringified, making this ideal for *displaying* and *introspecting* a database
-/// (schema, foreign keys, ad-hoc queries) rather than as a typed ORM.
-///
-/// ```swift
-/// import SQLiteReader
-///
-/// guard let db = SQLiteDB(url: fileURL) else { return }
-/// for table in db.tables() {
-///     print(table, db.rowCount(table))
-/// }
-/// ```
+/// Opens read-write when possible and falls back to read-only. Row values are stringified,
+/// for *displaying* and *introspecting* a database (schema, foreign keys, ad-hoc queries)
+/// rather than as a typed ORM.
 public final class SQLiteDB {
     private var db: OpaquePointer?
 
@@ -68,9 +59,9 @@ public final class SQLiteDB {
         }
         db = handle
         readOnly = false
-        // One statement at a time, each failure skipped (20 Sep 2026): a single exec stopped at
-        // the first statement SQLite could not take, so a Postgres schema opening with
-        // `CREATE EXTENSION` or carrying an `ALTER TABLE … ADD CONSTRAINT` built no tables at all.
+        // One statement at a time, each failure skipped: a single exec stops at the first
+        // statement SQLite cannot take, so a Postgres schema opening with `CREATE EXTENSION` or
+        // carrying an `ALTER TABLE … ADD CONSTRAINT` would build no tables at all.
         for statement in Self.statements(in: sql) {
             var err: UnsafeMutablePointer<CChar>?
             sqlite3_exec(handle, statement, nil, nil, &err)
@@ -125,7 +116,7 @@ public final class SQLiteDB {
 
     /// Which of ``tables()`` are VIEWS. A view is not a table — it has no rowid, its rows cannot
     /// be edited or deleted, and its count is a query's result — so a reader that lists both
-    /// needs to be able to say which is which (25 Sep 2026).
+    /// needs to be able to say which is which.
     public func viewNames() -> [String] {
         let r = run("SELECT name FROM sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%' ORDER BY name")
         return r.rows.compactMap { $0.first }
@@ -168,19 +159,11 @@ public final class SQLiteDB {
         return fks
     }
 
-    /// Runs SQL — a single statement or a `;`-separated script. Rows are capped at
-    /// `limit` for display safety.
-    ///
-    /// A script executes every statement in order, stopping at the first error. The
-    /// returned rows come from the *last* statement that produced columns (so
-    /// `UPDATE …; SELECT …` shows the SELECT), and ``Result/rowsAffected`` totals
-    /// the writes across all statements.
-    ///
-    /// - Returns: a ``Result`` with stringified rows, or an error message on failure.
-    /// - Note: Blocking — executes synchronously on the calling thread. Runs *any* SQL,
-    ///   including writes, when the database was opened read-write (check ``readOnly``).
-    ///   Values must be baked into the SQL text; for anything carrying user-supplied
-    ///   values, use ``execute(_:parameters:limit:)`` instead.
+    /// Runs SQL — a single statement or a `;`-separated script, in order, stopping at the first
+    /// error. Rows (capped at `limit`) come from the *last* statement that produced columns, so
+    /// `UPDATE …; SELECT …` shows the SELECT; ``Result/rowsAffected`` totals every write.
+    /// - Note: Blocking. Runs *any* SQL, writes included, when opened read-write (see
+    ///   ``readOnly``). For user-supplied values use ``execute(_:parameters:limit:)``.
     public func run(_ sql: String, limit: Int = 2000) -> Result {
         guard let db else { return Result(columns: [], rows: [], error: "No database", rowsAffected: 0) }
         var last: Result?
@@ -215,24 +198,11 @@ public final class SQLiteDB {
         return Result(columns: shown.columns, rows: shown.rows, error: nil, rowsAffected: totalAffected)
     }
 
-    /// Runs one *parameterized* SQL statement, binding `parameters` positionally
-    /// (`?` placeholders, 1-based under the hood) with the proper `sqlite3_bind_*`
-    /// call per ``Value`` case — values are never interpolated into the SQL text.
-    ///
-    /// ```swift
-    /// db.execute("UPDATE \(SQLiteDB.quoteIdentifier(table)) SET name = ? WHERE rowid = ?",
-    ///            parameters: [.text("Ada"), .integer(3)])
-    /// ```
-    ///
-    /// - Parameter parameters: one entry per placeholder; `nil` binds SQL `NULL`.
-    ///   A count mismatch against the statement's placeholders is an error (the
-    ///   statement is not executed).
-    /// - Returns: a ``Result`` exactly like ``run(_:limit:)`` — parameterized
-    ///   SELECTs return rows; writes report ``Result/rowsAffected``.
-    /// - Note: Blocking — executes synchronously on the calling thread. Runs exactly
-    ///   ONE statement — positional parameters can't be split across a script, so
-    ///   trailing statements are an error, not silently dropped (use ``run(_:limit:)``
-    ///   for scripts).
+    /// Runs one *parameterized* statement, binding `parameters` to its `?` placeholders with the
+    /// matching `sqlite3_bind_*` per ``Value`` — never interpolated into the SQL. `nil` binds
+    /// `NULL`; a count mismatch is an error. Returns a ``Result`` like ``run(_:limit:)``.
+    /// - Note: Blocking. Exactly ONE statement: trailing statements are an error, not silently
+    ///   dropped (use ``run(_:limit:)`` for scripts).
     @discardableResult
     public func execute(_ sql: String, parameters: [Value?] = [], limit: Int = 2000) -> Result {
         guard let db else { return .failure("No database") }
