@@ -6,13 +6,14 @@ let package = Package(
     defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "SQLiteReader", targets: ["SQLiteReader"]),
+        .library(name: "SQLiteReader", targets: ["SQLiteReader"])
     ],
     targets: [
         // Links the system libsqlite3 automatically via `import SQLite3`.
-        .target(name: "SQLiteReader", path: "Sources",
-                resources: [.process("SQLiteReader/Localizable.xcstrings")],
-                swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(
+            name: "SQLiteReader", path: "Sources",
+            resources: [.process("SQLiteReader/Localizable.xcstrings")],
+            swiftSettings: [.swiftLanguageMode(.v6)]),
         .testTarget(name: "SQLiteReaderTests", dependencies: ["SQLiteReader"], path: "Tests"),
     ]
 )

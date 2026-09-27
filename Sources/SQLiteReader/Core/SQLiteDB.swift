@@ -152,7 +152,8 @@ public final class SQLiteDB {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let toTable = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
             let from = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
-            let toColumn = sqlite3_column_type(stmt, 4) == SQLITE_NULL
+            let toColumn =
+                sqlite3_column_type(stmt, 4) == SQLITE_NULL
                 ? "" : (sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? "")
             fks.append(ForeignKey(from: from, toTable: toTable, toColumn: toColumn))
         }
@@ -165,7 +166,13 @@ public final class SQLiteDB {
     /// - Note: Blocking. Runs *any* SQL, writes included, when opened read-write (see
     ///   ``readOnly``). For user-supplied values use ``execute(_:parameters:limit:)``.
     public func run(_ sql: String, limit: Int = 2000) -> Result {
-        guard let db else { return Result(columns: [], rows: [], error: String(localized: "No database", bundle: .module, comment: "Database console error: the database file could not be opened."), rowsAffected: 0) }
+        guard let db else {
+            return Result(
+                columns: [], rows: [],
+                error: String(
+                    localized: "No database", bundle: .module, comment: "Database console error: the database file could not be opened."),
+                rowsAffected: 0)
+        }
         var last: Result?
         var lastWithColumns: Result?
         var failure: Result?
@@ -205,7 +212,11 @@ public final class SQLiteDB {
     ///   dropped (use ``run(_:limit:)`` for scripts).
     @discardableResult
     public func execute(_ sql: String, parameters: [Value?] = [], limit: Int = 2000) -> Result {
-        guard let db else { return .failure(String(localized: "No database", bundle: .module, comment: "Database console error: the database file could not be opened.")) }
+        guard let db else {
+            return .failure(
+                String(localized: "No database", bundle: .module, comment: "Database console error: the database file could not be opened.")
+            )
+        }
         let prepared = prepareSingleStatement(sql, on: db)
         if let error = prepared.error { return .failure(error) }
         guard let stmt = prepared.statement else { return Result(columns: [], rows: [], error: nil, rowsAffected: 0) }
@@ -259,12 +270,13 @@ public final class SQLiteDB {
     /// genuine zero-length blob, since bind_blob with a NULL base pointer would bind SQL NULL.
     private func bind(_ value: Value?, at idx: Int32, to stmt: OpaquePointer) -> Int32 {
         switch value {
-        case .none:                 return sqlite3_bind_null(stmt, idx)
+        case .none: return sqlite3_bind_null(stmt, idx)
         case .some(.integer(let v)): return sqlite3_bind_int64(stmt, idx, v)
-        case .some(.real(let v)):    return sqlite3_bind_double(stmt, idx, v)
-        case .some(.text(let s)):    return sqlite3_bind_text(stmt, idx, s, Int32(s.utf8.count), Self.transient)
+        case .some(.real(let v)): return sqlite3_bind_double(stmt, idx, v)
+        case .some(.text(let s)): return sqlite3_bind_text(stmt, idx, s, Int32(s.utf8.count), Self.transient)
         case .some(.blob(let d)):
-            return d.isEmpty ? sqlite3_bind_zeroblob(stmt, idx, 0)
+            return d.isEmpty
+                ? sqlite3_bind_zeroblob(stmt, idx, 0)
                 : d.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32(d.count), Self.transient) }
         }
     }
@@ -290,10 +302,10 @@ public final class SQLiteDB {
             for i in 0..<colCount {
                 let c = Int32(i)
                 switch sqlite3_column_type(stmt, c) {
-                case SQLITE_NULL:    row.append("NULL")
+                case SQLITE_NULL: row.append("NULL")
                 case SQLITE_INTEGER: row.append(String(sqlite3_column_int64(stmt, c)))
-                case SQLITE_FLOAT:   row.append(String(sqlite3_column_double(stmt, c)))
-                case SQLITE_BLOB:    row.append("‹blob \(sqlite3_column_bytes(stmt, c))b›")
+                case SQLITE_FLOAT: row.append(String(sqlite3_column_double(stmt, c)))
+                case SQLITE_BLOB: row.append("‹blob \(sqlite3_column_bytes(stmt, c))b›")
                 default:
                     // Decode the full column_bytes length — String(cString:) would
                     // silently truncate TEXT at an embedded NUL.
