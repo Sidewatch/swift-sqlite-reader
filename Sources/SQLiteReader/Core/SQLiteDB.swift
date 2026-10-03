@@ -62,11 +62,52 @@ public final class SQLiteDB {
         // One statement at a time, each failure skipped: a single exec stops at the first
         // statement SQLite cannot take, so a Postgres schema opening with `CREATE EXTENSION` or
         // carrying an `ALTER TABLE … ADD CONSTRAINT` would build no tables at all.
+        // A Postgres dump qualifies every name with its schema (`public.users`), which SQLite reads
+        // as a database it does not have. A statement that fails is run once more without the
+        // qualifiers of every schema seen so far: `public`, plus any SQLite has named in an
+        // "unknown database" or "no such table: schema.table" error.
+        var schemas: Set<String> = ["public"]
         for statement in Self.statements(in: sql) {
             var err: UnsafeMutablePointer<CChar>?
             sqlite3_exec(handle, statement, nil, nil, &err)
-            if let err { sqlite3_free(err) }
+            guard let err else { continue }
+            if let schema = Self.missingSchema(in: String(cString: err)) { schemas.insert(schema) }
+            sqlite3_free(err)
+            var unqualified = statement
+            for schema in schemas { unqualified = Self.removingQualifier(schema, from: unqualified) ?? unqualified }
+            guard unqualified != statement else { continue }
+            var retryErr: UnsafeMutablePointer<CChar>?
+            sqlite3_exec(handle, unqualified, nil, nil, &retryErr)
+            if let retryErr { sqlite3_free(retryErr) }
         }
+    }
+
+    /// The schema SQLite could not resolve, from an `unknown database <name>` (the name possibly
+    /// quoted) or a `no such table: <schema>.<table>` error; nil for any other error.
+    static func missingSchema(in message: String) -> String? {
+        var name: Substring
+        if message.hasPrefix("unknown database ") {
+            name = message.dropFirst("unknown database ".count)
+        } else if message.hasPrefix("no such table: "), let dot = message.firstIndex(of: ".") {
+            name = message[message.index(message.startIndex, offsetBy: "no such table: ".count)..<dot]
+        } else {
+            return nil
+        }
+        name = name.drop { $0 == "\"" || $0 == "`" || $0 == " " }
+        while let last = name.last, last == "\"" || last == "`" || last == " " { name = name.dropLast() }
+        return name.isEmpty ? nil : String(name)
+    }
+
+    /// `statement` with every `schema.` / `"schema".` qualifier removed (case-insensitive), or
+    /// nil when there was none to remove.
+    static func removingQualifier(_ schema: String, from statement: String) -> String? {
+        let name = NSRegularExpression.escapedPattern(for: schema)
+        // `name.`, `"name".` or `` `name`. `` — not the tail of a longer identifier (`republic.x`).
+        let pattern = #"(?<![\w."`])(?:"\#(name)"|`\#(name)`|\#(name))\.(?=["`\w])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let range = NSRange(statement.startIndex..., in: statement)
+        guard regex.firstMatch(in: statement, range: range) != nil else { return nil }
+        return regex.stringByReplacingMatches(in: statement, range: range, withTemplate: "")
     }
 
     /// The statements of a script: split on `;` outside quotes and comments (`--` to the end of

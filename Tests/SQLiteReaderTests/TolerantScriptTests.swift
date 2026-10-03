@@ -28,4 +28,32 @@ final class TolerantScriptTests: XCTestCase {
         let db = SQLiteDB(sql: postgres)
         XCTAssertEqual(db?.tables(), ["a", "b"], "both tables, despite the extension and the ALTER")
     }
+
+    func testAPostgresDumpsSchemaQualifiedNamesBuildTheirTables() {
+        let dump = """
+            DROP TABLE IF EXISTS public.users;
+            CREATE TABLE public.users (id integer NOT NULL, email text);
+            CREATE TABLE "public"."sessions" (id integer NOT NULL, user_id integer REFERENCES public.users(id));
+            CREATE TABLE public.orders (id integer NOT NULL, note text DEFAULT 'see public.users');
+            INSERT INTO public.users VALUES (1, 'a@example.com');
+            CREATE TABLE audit.events (id integer);
+            CREATE TABLE audit.logins (id integer, event_id integer REFERENCES audit.events(id));
+            """
+        let db = SQLiteDB(sql: dump)
+        // `public`, and `audit`, learned from SQLite's error on its first table.
+        XCTAssertEqual(db?.tables().sorted(), ["events", "logins", "orders", "sessions", "users"])
+        XCTAssertEqual(db?.rowCount("users"), 1)
+        XCTAssertEqual(db?.foreignKeys("sessions").map(\.toTable), ["users"], "the reference loses its qualifier too")
+    }
+
+    func testQualifierRemovalLeavesOtherDotsAlone() {
+        XCTAssertEqual(SQLiteDB.missingSchema(in: "unknown database public"), "public")
+        XCTAssertEqual(SQLiteDB.missingSchema(in: #"unknown database "billing""#), "billing")
+        XCTAssertEqual(SQLiteDB.missingSchema(in: "no such table: audit.events"), "audit")
+        XCTAssertNil(SQLiteDB.missingSchema(in: "no such table: users"))
+        XCTAssertEqual(
+            SQLiteDB.removingQualifier("public", from: "SELECT u.id FROM public.users u WHERE x = 1.5"),
+            "SELECT u.id FROM users u WHERE x = 1.5")
+        XCTAssertNil(SQLiteDB.removingQualifier("public", from: "SELECT republic.x FROM t"))
+    }
 }
