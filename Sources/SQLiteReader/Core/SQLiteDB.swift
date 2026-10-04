@@ -23,21 +23,24 @@ public final class SQLiteDB {
     /// `true` when the database could only be opened read-only.
     public let readOnly: Bool
 
-    /// Opens the database at `url`, read-write if possible, otherwise read-only.
+    /// Opens the database at `url`, read-write if possible, otherwise read-only — or read-only
+    /// from the start when `forceReadOnly` (a preview that must never write, or leave a journal).
     ///
     /// - Returns: `nil` if the file cannot be opened at all (e.g. it doesn't exist —
     ///   this initializer never *creates* a database).
-    public init?(url: URL) {
+    public init?(url: URL, readOnly forceReadOnly: Bool = false) {
         var handle: OpaquePointer?
-        if sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK {
-            db = handle; readOnly = false
-            // Retry briefly instead of failing instantly when another process holds a lock.
-            sqlite3_busy_timeout(handle, 250)
-            return
+        if !forceReadOnly {
+            if sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK {
+                db = handle; readOnly = false
+                // Retry briefly instead of failing instantly when another process holds a lock.
+                sqlite3_busy_timeout(handle, 250)
+                return
+            }
+            // A failed open still allocates a connection that must be closed before retrying.
+            if let handle { sqlite3_close(handle) }
+            handle = nil
         }
-        // A failed open still allocates a connection that must be closed before retrying.
-        if let handle { sqlite3_close(handle) }
-        handle = nil
         if sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
             db = handle; readOnly = true
             sqlite3_busy_timeout(handle, 250)

@@ -309,4 +309,23 @@ final class SQLiteReaderTests: XCTestCase {
             .appendingPathComponent("missing-\(UUID().uuidString).db")
         XCTAssertNil(SQLiteDB(url: url))  // never creates a database
     }
+
+    /// A forced read-only open reads but refuses every write, and says it is read-only.
+    func testAForcedReadOnlyOpenNeverWrites() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ro-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let rw = try XCTUnwrap(
+            SQLiteDB(url: url)
+                ?? {
+                    FileManager.default.createFile(atPath: url.path, contents: nil)
+                    return SQLiteDB(url: url)
+                }())
+        _ = rw.execute("CREATE TABLE t (n)")
+        _ = rw.execute("INSERT INTO t VALUES (1)")
+        let ro = try XCTUnwrap(SQLiteDB(url: url, readOnly: true))
+        XCTAssertTrue(ro.readOnly)
+        XCTAssertEqual(ro.rowCount("t"), 1)
+        XCTAssertNotNil(ro.execute("INSERT INTO t VALUES (2);").error, "a write is refused")
+        XCTAssertEqual(ro.rowCount("t"), 1)
+    }
 }
