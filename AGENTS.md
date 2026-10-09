@@ -10,6 +10,7 @@ A tiny, zero-dependency wrapper over the system `libsqlite3` for **reading and i
 
 - `Core/` — the engine: SQLiteDB
 - `Models/` — value types — the shape of a thing, nothing else: SQLiteDB+Column, SQLiteDB+ForeignKey, SQLiteDB+Result, SQLiteDB+Value
+- `Support/` — pure helpers: SchemaAuthorizer (the rule a script-built connection runs under: CREATE/ALTER and schema reads pass; ATTACH, DETACH, DROP and data writes are refused)
 
 ## Rules
 

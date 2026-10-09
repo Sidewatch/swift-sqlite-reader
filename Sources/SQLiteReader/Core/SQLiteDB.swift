@@ -50,18 +50,25 @@ public final class SQLiteDB {
         return nil
     }
 
-    /// Builds an in-memory database by executing `sql`.
+    /// Builds an in-memory database by executing the schema statements of `sql`.
     ///
     /// Useful for visualizing a `schema.sql` (DDL text) without a real database file.
-    /// Execution errors are tolerated so a partial schema still renders.
+    /// Execution errors are tolerated so a partial schema still renders. The text is treated as
+    /// untrusted: the connection runs under ``SchemaAuthorizer`` for its life — CREATE, ALTER and
+    /// the reads that describe them run; ATTACH, DETACH, DROP and data writes (INSERT, UPDATE,
+    /// DELETE) are refused, in the script and in every later ``run(_:limit:)`` — and it can hold
+    /// no attached database. A fixture that needs rows belongs in a file opened with
+    /// ``init(url:readOnly:)``.
     public init?(sql: String) {
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(":memory:", &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
-            if let handle { sqlite3_close(handle) }
+        var opened: OpaquePointer?
+        guard sqlite3_open_v2(":memory:", &opened, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK, let handle = opened
+        else {
+            if let opened { sqlite3_close(opened) }
             return nil
         }
         db = handle
         readOnly = false
+        SchemaAuthorizer.install(on: handle)
         // One statement at a time, each failure skipped: a single exec stops at the first
         // statement SQLite cannot take, so a Postgres schema opening with `CREATE EXTENSION` or
         // carrying an `ALTER TABLE … ADD CONSTRAINT` would build no tables at all.
@@ -149,6 +156,10 @@ public final class SQLiteDB {
         out.append(current)
         return out.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
+
+    /// How many databases may be attached to this connection: 0 for a build from SQL text,
+    /// SQLite's default for a file.
+    var attachedDatabaseLimit: Int32 { db.map { sqlite3_limit($0, SQLITE_LIMIT_ATTACHED, -1) } ?? -1 }
 
     deinit { if let db { sqlite3_close(db) } }
 

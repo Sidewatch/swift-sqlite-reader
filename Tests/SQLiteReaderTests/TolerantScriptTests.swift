@@ -42,7 +42,7 @@ final class TolerantScriptTests: XCTestCase {
         let db = SQLiteDB(sql: dump)
         // `public`, and `audit`, learned from SQLite's error on its first table.
         XCTAssertEqual(db?.tables().sorted(), ["events", "logins", "orders", "sessions", "users"])
-        XCTAssertEqual(db?.rowCount("users"), 1)
+        XCTAssertEqual(db?.rowCount("users"), 0, "the dump's INSERT is a data write, which a schema build refuses")
         XCTAssertEqual(db?.foreignKeys("sessions").map(\.toTable), ["users"], "the reference loses its qualifier too")
     }
 

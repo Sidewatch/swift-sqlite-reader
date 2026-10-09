@@ -16,8 +16,26 @@ import SQLite3
 /// Tests for `SQLiteDB`: tables and views sorted, schema reads, queries, rowid edits, and the
 /// read-only flag.
 final class SQLiteReaderTests: XCTestCase {
+    private var scratchFiles: [URL] = []
 
-    // MARK: - In-memory schema (init?(sql:))
+    override func tearDown() {
+        scratchFiles.forEach { try? FileManager.default.removeItem(at: $0) }
+        super.tearDown()
+    }
+
+    /// A writable database in a temporary file built from `sql`. The in-memory builder runs
+    /// schema statements only, so a fixture with rows — what the query, edit and binding tests
+    /// need — lives in a file opened read-write.
+    private func scratch(_ sql: String) throws -> SQLiteDB {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("sqlitereader-\(UUID().uuidString).db")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        scratchFiles.append(url)
+        let db = try XCTUnwrap(SQLiteDB(url: url))
+        XCTAssertNil(db.run(sql).error, "the fixture script runs whole")
+        return db
+    }
+
+    // MARK: - Schema builds (init?(sql:)) and scratch fixtures
 
     func testTablesIncludeViewsSorted() throws {
         let db = try XCTUnwrap(
@@ -46,12 +64,11 @@ final class SQLiteReaderTests: XCTestCase {
     }
 
     func testRowCountAndQuery() throws {
-        let db = try XCTUnwrap(
-            SQLiteDB(
-                sql: """
-                        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-                        INSERT INTO users (name) VALUES ('Ada'), ('Alan');
-                    """))
+        let db = try scratch(
+            """
+                CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+                INSERT INTO users (name) VALUES ('Ada'), ('Alan');
+            """)
         XCTAssertEqual(db.rowCount("users"), 2)
         let r = db.run("SELECT name FROM users ORDER BY name")
         XCTAssertNil(r.error)
@@ -74,10 +91,7 @@ final class SQLiteReaderTests: XCTestCase {
     }
 
     func testColumnTypesAreStringified() throws {
-        let db = try XCTUnwrap(
-            SQLiteDB(
-                sql:
-                    "CREATE TABLE t (i INTEGER, f REAL, s TEXT, n); INSERT INTO t VALUES (7, 1.5, 'hi', NULL);"))
+        let db = try scratch("CREATE TABLE t (i INTEGER, f REAL, s TEXT, n); INSERT INTO t VALUES (7, 1.5, 'hi', NULL);")
         let r = db.run("SELECT i, f, s, n FROM t")
         XCTAssertEqual(r.rows.first, ["7", "1.5", "hi", "NULL"])
     }
@@ -88,10 +102,7 @@ final class SQLiteReaderTests: XCTestCase {
     }
 
     func testRunHonorsRowLimit() throws {
-        let db = try XCTUnwrap(
-            SQLiteDB(
-                sql:
-                    "CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3),(4),(5);"))
+        let db = try scratch("CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3),(4),(5);")
         let r = db.run("SELECT * FROM t", limit: 3)
         XCTAssertEqual(r.rows.count, 3)
         XCTAssertNil(r.error)  // stopping at the display limit is not an error
@@ -100,10 +111,7 @@ final class SQLiteReaderTests: XCTestCase {
     func testStepTimeErrorIsSurfaced() throws {
         // abs() of the most negative integer raises a runtime "integer overflow" at
         // step time (prepare succeeds) — it must not look like a successful empty result.
-        let db = try XCTUnwrap(
-            SQLiteDB(
-                sql:
-                    "CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (-9223372036854775808);"))
+        let db = try scratch("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (-9223372036854775808);")
         let r = db.run("SELECT abs(n) FROM t")
         XCTAssertNotNil(r.error)
     }
@@ -111,10 +119,7 @@ final class SQLiteReaderTests: XCTestCase {
     func testRowsAffectedIsZeroForReadOnlyStatements() throws {
         // sqlite3_changes reports the last write on the connection; a SELECT after a
         // DELETE must not inherit the DELETE's count.
-        let db = try XCTUnwrap(
-            SQLiteDB(
-                sql:
-                    "CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3);"))
+        let db = try scratch("CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3);")
         XCTAssertEqual(db.run("DELETE FROM t WHERE n < 3").rowsAffected, 2)
         XCTAssertEqual(db.run("SELECT * FROM t").rowsAffected, 0)
     }
@@ -136,7 +141,7 @@ final class SQLiteReaderTests: XCTestCase {
 
     func testIdentifierQuotingSurvivesSpecialTableName() throws {
         // A table name with a double quote must be quote-escaped internally.
-        let db = try XCTUnwrap(SQLiteDB(sql: #"CREATE TABLE "we ird" (a); INSERT INTO "we ird" VALUES (1);"#))
+        let db = try scratch(#"CREATE TABLE "we ird" (a); INSERT INTO "we ird" VALUES (1);"#)
         XCTAssertEqual(db.rowCount("we ird"), 1)
         XCTAssertEqual(db.schema("we ird").map(\.name), ["a"])
     }
@@ -144,7 +149,7 @@ final class SQLiteReaderTests: XCTestCase {
     // MARK: - Parameterized execution (execute)
 
     func testExecuteBindsTypedParameters() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (i INTEGER, f REAL, s TEXT, n);"))
+        let db = try scratch("CREATE TABLE t (i INTEGER, f REAL, s TEXT, n);")
         let w = db.execute(
             "INSERT INTO t VALUES (?, ?, ?, ?)",
             parameters: [.integer(7), .real(1.5), .text("hi"), nil])
@@ -154,7 +159,7 @@ final class SQLiteReaderTests: XCTestCase {
     }
 
     func testExecuteSelectWithParametersReturnsRows() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3);"))
+        let db = try scratch("CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3);")
         let r = db.execute("SELECT n FROM t WHERE n > ? ORDER BY n", parameters: [.integer(1)])
         XCTAssertNil(r.error)
         XCTAssertEqual(r.rows.map { $0[0] }, ["2", "3"])
@@ -163,7 +168,7 @@ final class SQLiteReaderTests: XCTestCase {
 
     func testExecuteUpdateByRowid() throws {
         // The cell-edit shape: UPDATE <table> SET <col> = ? WHERE rowid = ?
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('a'),('b');"))
+        let db = try scratch("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('a'),('b');")
         let r = db.execute("UPDATE t SET name = ? WHERE rowid = ?", parameters: [.text("z"), .integer(2)])
         XCTAssertNil(r.error)
         XCTAssertEqual(r.rowsAffected, 1)
@@ -172,7 +177,7 @@ final class SQLiteReaderTests: XCTestCase {
 
     func testExecuteNeverInterpretsValueAsSQL() throws {
         // A bound value must stay a literal — no string interpolation into the SQL.
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (s TEXT);"))
+        let db = try scratch("CREATE TABLE t (s TEXT);")
         let hostile = "x'); DROP TABLE t;--"
         XCTAssertNil(db.execute("INSERT INTO t VALUES (?)", parameters: [.text(hostile)]).error)
         XCTAssertEqual(db.tables(), ["t"])  // still here
@@ -180,7 +185,7 @@ final class SQLiteReaderTests: XCTestCase {
     }
 
     func testExecuteParameterCountMismatchErrors() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (a, b);"))
+        let db = try scratch("CREATE TABLE t (a, b);")
         XCTAssertNotNil(db.execute("INSERT INTO t VALUES (?, ?)", parameters: [.integer(1)]).error)
         XCTAssertNotNil(
             db.execute(
@@ -193,7 +198,7 @@ final class SQLiteReaderTests: XCTestCase {
     func testExecuteBindsBlobIncludingEmpty() throws {
         // Empty Data must bind a genuine zero-length blob, not SQL NULL
         // (sqlite3_bind_blob with a NULL pointer would bind NULL).
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (d BLOB);"))
+        let db = try scratch("CREATE TABLE t (d BLOB);")
         XCTAssertNil(db.execute("INSERT INTO t VALUES (?)", parameters: [.blob(Data([1, 2, 3]))]).error)
         XCTAssertNil(db.execute("INSERT INTO t VALUES (?)", parameters: [.blob(Data())]).error)
         XCTAssertEqual(
@@ -202,14 +207,14 @@ final class SQLiteReaderTests: XCTestCase {
     }
 
     func testExecuteHonorsRowLimit() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3),(4);"))
+        let db = try scratch("CREATE TABLE t (n); INSERT INTO t VALUES (1),(2),(3),(4);")
         let r = db.execute("SELECT * FROM t WHERE n > ?", parameters: [.integer(0)], limit: 2)
         XCTAssertNil(r.error)
         XCTAssertEqual(r.rows.count, 2)
     }
 
     func testLastInsertRowID() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (a);"))
+        let db = try scratch("CREATE TABLE t (a);")
         XCTAssertNil(db.execute("INSERT INTO t DEFAULT VALUES").error)  // the + Row shape
         XCTAssertEqual(db.lastInsertRowID, 1)
         XCTAssertNil(db.execute("INSERT INTO t DEFAULT VALUES").error)
@@ -218,7 +223,7 @@ final class SQLiteReaderTests: XCTestCase {
 
     // Regression: run() prepared only the first statement and silently dropped the rest.
     func testRunExecutesEveryStatementInAScript() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (n); INSERT INTO t VALUES (1),(2);"))
+        let db = try scratch("CREATE TABLE t (n); INSERT INTO t VALUES (1),(2);")
         let r = db.run("UPDATE t SET n = 9 WHERE n = 2; SELECT n FROM t ORDER BY n")
         XCTAssertNil(r.error)
         XCTAssertEqual(r.columns, ["n"])  // the SELECT's shape wins
@@ -231,7 +236,7 @@ final class SQLiteReaderTests: XCTestCase {
     }
 
     func testRunScriptStopsAtFirstError() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (n);"))
+        let db = try scratch("CREATE TABLE t (n);")
         let r = db.run("INSERT INTO t VALUES (1); SELECT * FROM nope; INSERT INTO t VALUES (2)")
         XCTAssertNotNil(r.error)
         XCTAssertEqual(db.rowCount("t"), 1)  // nothing after the error ran
@@ -239,7 +244,7 @@ final class SQLiteReaderTests: XCTestCase {
 
     // Regression: execute() silently ignored statements after the first.
     func testExecuteRejectsTrailingStatements() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (n);"))
+        let db = try scratch("CREATE TABLE t (n);")
         let r = db.execute("INSERT INTO t VALUES (?); DROP TABLE t", parameters: [.integer(1)])
         XCTAssertNotNil(r.error)
         XCTAssertEqual(db.tables(), ["t"])  // neither statement ran
@@ -250,7 +255,7 @@ final class SQLiteReaderTests: XCTestCase {
 
     // Regression: TEXT with an embedded NUL was truncated at the NUL by String(cString:).
     func testTextWithEmbeddedNULIsNotTruncated() throws {
-        let db = try XCTUnwrap(SQLiteDB(sql: "CREATE TABLE t (b);"))
+        let db = try scratch("CREATE TABLE t (b);")
         XCTAssertNil(db.run("INSERT INTO t VALUES (char(104,0,105))").error)  // 'h\0i'
         XCTAssertEqual(db.run("SELECT b FROM t").rows.first?.first, "h\u{0}i")
     }

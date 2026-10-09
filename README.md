@@ -52,6 +52,7 @@ else { for row in result.rows { print(row) } }
 ## Notes
 
 - `SQLiteDB(url:)` **never creates** a database — it returns `nil` for a missing file.
+- `SQLiteDB(sql:)` builds a **schema only**: the text is untrusted, so the connection can hold no attached database and an authorizer refuses ATTACH, DETACH, DROP and data writes (INSERT, UPDATE, DELETE) in the script and in every later `run`. A fixture that needs rows belongs in a file opened with `SQLiteDB(url:)`.
 - Row values are stringified (`NULL`, integers, doubles, text; blobs as `‹blob Nb›`).
 - `run(_:limit:)` caps returned rows (default 2000) for display safety.
 
