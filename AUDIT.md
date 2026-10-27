@@ -59,3 +59,8 @@ foreign-key pragmas.
 - 17 Sep 2026 — full audit (app + all 20 libraries), Claude with David.
 - 18 Sep 2026 — logic review (every source and test file, line by line), Claude with David.
 - 9 Oct 2026 — security review: `SchemaAuthorizer` on every script-built connection (see the section above); 36 tests.
+- 27 Oct 2026 — a script's schema qualifiers are matched with one compiled pattern per schema
+  (`qualifierPattern(_:cache:)`): the authorizer refuses every INSERT of a dump, every refusal was retried once per
+  known schema, and each retry compiled a case-insensitive pattern, an ICU case closure each time. An 8 MB dump of
+  112,000 INSERTs: 17 s on Sidewatch's main thread before, 0.85 s after (0.68 s of it splitting the statements). Test:
+  the second ask returns the first pattern; its mutant (the cache never keeps one) caught.

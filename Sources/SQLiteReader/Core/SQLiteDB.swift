@@ -77,6 +77,7 @@ public final class SQLiteDB {
         // qualifiers of every schema seen so far: `public`, plus any SQLite has named in an
         // "unknown database" or "no such table: schema.table" error.
         var schemas: Set<String> = ["public"]
+        var patterns: [String: NSRegularExpression] = [:]
         for statement in Self.statements(in: sql) {
             var err: UnsafeMutablePointer<CChar>?
             sqlite3_exec(handle, statement, nil, nil, &err)
@@ -84,7 +85,10 @@ public final class SQLiteDB {
             if let schema = Self.missingSchema(in: String(cString: err)) { schemas.insert(schema) }
             sqlite3_free(err)
             var unqualified = statement
-            for schema in schemas { unqualified = Self.removingQualifier(schema, from: unqualified) ?? unqualified }
+            for schema in schemas {
+                guard let pattern = Self.qualifierPattern(schema, cache: &patterns) else { continue }
+                unqualified = Self.removing(pattern, from: unqualified) ?? unqualified
+            }
             guard unqualified != statement else { continue }
             var retryErr: UnsafeMutablePointer<CChar>?
             sqlite3_exec(handle, unqualified, nil, nil, &retryErr)
@@ -111,13 +115,28 @@ public final class SQLiteDB {
     /// `statement` with every `schema.` / `"schema".` qualifier removed (case-insensitive), or
     /// nil when there was none to remove.
     static func removingQualifier(_ schema: String, from statement: String) -> String? {
+        var cache: [String: NSRegularExpression] = [:]
+        return qualifierPattern(schema, cache: &cache).flatMap { removing($0, from: statement) }
+    }
+
+    /// The pattern that finds `schema`'s qualifier, compiled once for a whole script (`cache`): a case-insensitive
+    /// pattern costs ICU a case closure to compile, and a dump whose every INSERT the authorizer refuses retries every
+    /// one of them — 112,000 compiles, 17 s, for an 8 MB dump before this.
+    static func qualifierPattern(_ schema: String, cache: inout [String: NSRegularExpression]) -> NSRegularExpression? {
+        if let compiled = cache[schema] { return compiled }
         let name = NSRegularExpression.escapedPattern(for: schema)
         // `name.`, `"name".` or `` `name`. `` — not the tail of a longer identifier (`republic.x`).
         let pattern = #"(?<![\w."`])(?:"\#(name)"|`\#(name)`|\#(name))\.(?=["`\w])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let compiled = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        cache[schema] = compiled
+        return compiled
+    }
+
+    /// `statement` without every qualifier `pattern` finds, or nil when it has none.
+    static func removing(_ pattern: NSRegularExpression, from statement: String) -> String? {
         let range = NSRange(statement.startIndex..., in: statement)
-        guard regex.firstMatch(in: statement, range: range) != nil else { return nil }
-        return regex.stringByReplacingMatches(in: statement, range: range, withTemplate: "")
+        guard pattern.firstMatch(in: statement, range: range) != nil else { return nil }
+        return pattern.stringByReplacingMatches(in: statement, range: range, withTemplate: "")
     }
 
     /// The statements of a script: split on `;` outside quotes and comments (`--` to the end of

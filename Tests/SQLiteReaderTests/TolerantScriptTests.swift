@@ -56,4 +56,14 @@ final class TolerantScriptTests: XCTestCase {
             "SELECT u.id FROM users u WHERE x = 1.5")
         XCTAssertNil(SQLiteDB.removingQualifier("public", from: "SELECT republic.x FROM t"))
     }
+
+    /// A schema's qualifier pattern is compiled once for a whole script, however many statements are retried.
+    func testAQualifierPatternIsCompiledOncePerScript() throws {
+        var cache: [String: NSRegularExpression] = [:]
+        let first = try XCTUnwrap(SQLiteDB.qualifierPattern("public", cache: &cache))
+        let again = try XCTUnwrap(SQLiteDB.qualifierPattern("public", cache: &cache))
+        XCTAssertTrue(first === again, "the second ask is the first pattern")
+        XCTAssertFalse(try XCTUnwrap(SQLiteDB.qualifierPattern("audit", cache: &cache)) === first, "a schema of its own")
+        XCTAssertEqual(SQLiteDB.removing(first, from: "INSERT INTO public.users VALUES (1)"), "INSERT INTO users VALUES (1)")
+    }
 }
