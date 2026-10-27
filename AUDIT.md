@@ -64,3 +64,12 @@ foreign-key pragmas.
   known schema, and each retry compiled a case-insensitive pattern, an ICU case closure each time. An 8 MB dump of
   112,000 INSERTs: 17 s on Sidewatch's main thread before, 0.85 s after (0.68 s of it splitting the statements). Test:
   the second ask returns the first pattern; its mutant (the cache never keeps one) caught.
+- 27 Oct 2026 — typed cells. Every `Result` keeps `cells` beside its display `rows`, each value as SQLite stored it
+  (`SQLiteDB.Cell`), so a copy can tell a real NULL from the text "NULL" and 42 from "042"; a blob keeps its bytes up
+  to 64 KB, and 16 MB a result. `insertStatements(into:columns:rows:)` writes rows as INSERT statements (`literal`:
+  quotes doubled, `X'…'`, `9e999`, a blob not kept is NULL with a comment saying so), and `createStatements(for:)` a
+  table's own SQL. `TypedCellsTests`: the storage classes and the unchanged display text, a big blob's size alone,
+  rows and cells moving together, INSERT statements run into a fresh table giving back the same cells, a table's and
+  a view's CREATE. Found by them: `run` rebuilt its result from the display text and dropped the cells. Mutants, each
+  run and restored: integers read as text, a blob kept past the limit, a reorder leaving the cells, quotes not doubled,
+  an unkept blob written as `X''`, `run` dropping the cells — all caught.

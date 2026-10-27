@@ -4,13 +4,16 @@ A tiny, zero-dependency wrapper over the system `libsqlite3` for **reading and i
 
 ## Features
 
-- 🗄️ **Open a file** read-write (falling back to read-only, flagged via `readOnly`) with `SQLiteDB(url:)` — never creates a missing database
-- 🧠 **Or an in-memory DB from DDL** with `SQLiteDB(sql:)` — visualize a `schema.sql` with no file
-- 🔎 **Introspection** — `tables()`, `schema(_:)` (columns, PK, NOT NULL), `foreignKeys(_:)`, `rowCount(_:)`
-- ▶️ **Ad-hoc queries** — `run(_:limit:)` returns a `SQLiteDB.Result` (columns, stringified rows, `error`, `rowsAffected`), row-capped for display safety
-- 🧱 **Safe identifiers** — table/column names are quote-escaped internally
-- 🪶 **Zero dependencies** — Foundation + the system `libsqlite3` (auto-linked via `import SQLite3`)
-- 🍎 **Cross-platform** — iOS, macOS, tvOS, watchOS, visionOS
+- **Open a file** read-write (falling back to read-only, flagged via `readOnly`) with `SQLiteDB(url:)` — never creates a missing database
+- **Or an in-memory DB from DDL** with `SQLiteDB(sql:)` — visualize a `schema.sql` with no file
+- **Introspection** — `tables()`, `schema(_:)` (columns, PK, NOT NULL), `foreignKeys(_:)`, `rowCount(_:)`
+- **Ad-hoc queries** — `run(_:limit:)` returns a `SQLiteDB.Result` (columns, stringified rows, `error`, `rowsAffected`), row-capped for display safety
+- **Typed cells beside the text** — every `Result` keeps `cells`, each value as SQLite stored it (`SQLiteDB.Cell`: NULL, INTEGER, REAL, TEXT, BLOB with its bytes up to 64 KB), so a real NULL is not the text "NULL"; `reordered(_:)`, `droppingFirstColumn()`, `replacingRow(_:withFirstRowOf:)` and `appendingFirstRow(of:)` keep rows and cells in step
+- **Rows as INSERT statements** — `SQLiteDB.insertStatements(into:columns:rows:)`, each value an SQL literal (`literal(_:)`); running them puts the same values back, types and all
+- **A table's own SQL** — `createStatements(for:)`: its CREATE statement, then its indexes' and triggers'
+- **Safe identifiers** — table/column names are quote-escaped internally
+- **Zero dependencies** — Foundation + the system `libsqlite3` (auto-linked via `import SQLite3`)
+- **Cross-platform** — iOS, macOS, tvOS, watchOS, visionOS
 
 ## Requirements
 
@@ -47,6 +50,12 @@ for table in db.tables() {
 let result = db.run("SELECT name, email FROM users LIMIT 50")
 if let error = result.error { print("error:", error) }
 else { for row in result.rows { print(row) } }
+
+// The same rows typed, and as INSERT statements that put them back.
+result.cells.first        // [.text("Ada"), .null]
+SQLiteDB.insertStatements(into: "users", columns: result.columns, rows: result.cells)
+// INSERT INTO "users" ("name", "email") VALUES ('Ada', NULL);
+db.createStatements(for: "users")   // ["CREATE TABLE users (…);", "CREATE INDEX users_email ON users (email);"]
 ```
 
 ## Notes

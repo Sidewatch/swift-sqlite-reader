@@ -9,8 +9,8 @@ A tiny, zero-dependency wrapper over the system `libsqlite3` for **reading and i
 ## Module map
 
 - `Core/` — the engine: SQLiteDB
-- `Models/` — value types — the shape of a thing, nothing else: SQLiteDB+Column, SQLiteDB+ForeignKey, SQLiteDB+Result, SQLiteDB+Value
-- `Support/` — pure helpers: SchemaAuthorizer (the rule a script-built connection runs under: CREATE/ALTER and schema reads pass; ATTACH, DETACH, DROP and data writes are refused)
+- `Models/` — value types — the shape of a thing, nothing else: SQLiteDB+Column, SQLiteDB+ForeignKey, SQLiteDB+Result (display `rows` and typed `cells`, kept in step by SQLiteDB+Result+Rows: `reordered`, `droppingFirstColumn`, `replacingRow`, `appendingFirstRow`), SQLiteDB+Cell (a cell as SQLite stored it; blobs keep their bytes up to `keptBlobBytes`, 64 KB, and `keptBlobTotal`, 16 MB a result), SQLiteDB+Value
+- `Support/` — pure helpers: SQLiteDB+Insert (`insertStatements(into:columns:rows:)`, `literal(_:)`: rows as INSERT statements that put the same cells back), SchemaAuthorizer (the rule a script-built connection runs under: CREATE/ALTER and schema reads pass; ATTACH, DETACH, DROP and data writes are refused)
 
 ## Rules
 

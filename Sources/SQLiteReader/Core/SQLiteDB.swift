@@ -3,7 +3,7 @@
 //  SQLiteReader
 //
 //  Zero-dependency read/introspect access to a SQLite database via the system
-//  libsqlite3. Values are stringified for display.
+//  libsqlite3. Values are stringified for display, and kept typed beside it.
 //
 //  Created by David Sherlock on 7/9/26.
 //  Copyright © 2026 ArrayPress Limited. MIT licence.
@@ -267,7 +267,7 @@ public final class SQLiteDB {
                 sqlite3_finalize(stmt)
                 totalAffected += r.rowsAffected
                 if r.error != nil {
-                    failure = Result(columns: r.columns, rows: r.rows, error: r.error, rowsAffected: totalAffected)
+                    failure = Result(columns: r.columns, rows: r.rows, cells: r.cells, error: r.error, rowsAffected: totalAffected)
                     return
                 }
                 last = r
@@ -276,7 +276,7 @@ public final class SQLiteDB {
         }
         if let failure { return failure }
         let shown = lastWithColumns ?? last ?? Result(columns: [], rows: [], error: nil, rowsAffected: 0)
-        return Result(columns: shown.columns, rows: shown.rows, error: nil, rowsAffected: totalAffected)
+        return Result(columns: shown.columns, rows: shown.rows, cells: shown.cells, error: nil, rowsAffected: totalAffected)
     }
 
     /// Runs one *parameterized* statement, binding `parameters` to its `?` placeholders with the
@@ -362,37 +362,19 @@ public final class SQLiteDB {
     /// `SQLITE_TRANSIENT` — tells SQLite to copy bound text/blob buffers immediately.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    /// Steps a prepared statement to completion, stringifying rows (capped at `limit`)
+    /// Steps a prepared statement to completion, reading typed cells and their display text (capped at `limit` rows)
     /// — the shared back half of ``run(_:limit:)`` and ``execute(_:parameters:limit:)``.
     private func collect(_ stmt: OpaquePointer, on db: OpaquePointer, limit: Int) -> Result {
         let colCount = Int(sqlite3_column_count(stmt))
         var columns: [String] = []
         for i in 0..<colCount { columns.append(String(cString: sqlite3_column_name(stmt, Int32(i)))) }
 
-        var rows: [[String]] = []
+        var cells: [[Cell]] = []
+        var keptBlobs = 0
         var rc = sqlite3_step(stmt)
         while rc == SQLITE_ROW {
-            var row: [String] = []
-            for i in 0..<colCount {
-                let c = Int32(i)
-                switch sqlite3_column_type(stmt, c) {
-                case SQLITE_NULL: row.append("NULL")
-                case SQLITE_INTEGER: row.append(String(sqlite3_column_int64(stmt, c)))
-                case SQLITE_FLOAT: row.append(String(sqlite3_column_double(stmt, c)))
-                case SQLITE_BLOB: row.append("‹blob \(sqlite3_column_bytes(stmt, c))b›")
-                default:
-                    // Decode the full column_bytes length — String(cString:) would
-                    // silently truncate TEXT at an embedded NUL.
-                    if let ptr = sqlite3_column_text(stmt, c) {
-                        let count = Int(sqlite3_column_bytes(stmt, c))
-                        row.append(String(decoding: UnsafeBufferPointer(start: ptr, count: count), as: UTF8.self))
-                    } else {
-                        row.append("")
-                    }
-                }
-            }
-            rows.append(row)
-            if rows.count >= limit { break }
+            cells.append((0..<colCount).map { Self.cell(stmt, Int32($0), keptBlobs: &keptBlobs) })
+            if cells.count >= limit { break }
             rc = sqlite3_step(stmt)
         }
         // rc == SQLITE_ROW here means we stopped at the display limit; anything other than
@@ -402,7 +384,41 @@ public final class SQLiteDB {
         // sqlite3_changes reports the last write on the connection and is NOT reset by
         // read-only statements — only report it for statements that can actually write.
         let affected = sqlite3_stmt_readonly(stmt) != 0 ? 0 : Int(sqlite3_changes(db))
-        return Result(columns: columns, rows: rows, error: stepError, rowsAffected: affected)
+        return Result(columns: columns, cells: cells, error: stepError, rowsAffected: affected)
+    }
+
+    /// Column `c` of the current row as SQLite stored it. A blob keeps its bytes while it fits ``keptBlobBytes`` and
+    /// the result's blobs so far stay within ``keptBlobTotal``; `keptBlobs` is that running total.
+    private static func cell(_ stmt: OpaquePointer, _ c: Int32, keptBlobs: inout Int) -> Cell {
+        switch sqlite3_column_type(stmt, c) {
+        case SQLITE_NULL: return .null
+        case SQLITE_INTEGER: return .integer(sqlite3_column_int64(stmt, c))
+        case SQLITE_FLOAT: return .real(sqlite3_column_double(stmt, c))
+        case SQLITE_BLOB:
+            let bytes = sqlite3_column_blob(stmt, c)  // before column_bytes, as SQLite asks
+            let count = Int(sqlite3_column_bytes(stmt, c))
+            guard count > 0 else { return .blob(Data(), count: 0) }
+            guard let bytes, count <= keptBlobBytes, keptBlobs + count <= keptBlobTotal else { return .blob(nil, count: count) }
+            keptBlobs += count
+            return .blob(Data(bytes: bytes, count: count), count: count)
+        default:
+            // Decode the full column_bytes length — String(cString:) would
+            // silently truncate TEXT at an embedded NUL.
+            guard let text = sqlite3_column_text(stmt, c) else { return .text("") }
+            let count = Int(sqlite3_column_bytes(stmt, c))
+            return .text(String(decoding: UnsafeBufferPointer(start: text, count: count), as: UTF8.self))
+        }
+    }
+
+    /// The SQL that made `table` as SQLite keeps it in `sqlite_master`: its CREATE statement, then its indexes' and
+    /// triggers', each ending in `;`. Empty for a name that is not there; an index SQLite made itself (for a UNIQUE or
+    /// PRIMARY KEY constraint) has no SQL and is left out.
+    public func createStatements(for table: String) -> [String] {
+        execute(
+            "SELECT sql FROM sqlite_master WHERE tbl_name = ? AND sql IS NOT NULL "
+                + "ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'view' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, rowid",
+            parameters: [.text(table)]
+        ).rows.compactMap(\.first).map { $0.hasSuffix(";") ? $0 : $0 + ";" }
     }
 
     /// Double-quotes an identifier (escaping embedded quotes) for safe interpolation
